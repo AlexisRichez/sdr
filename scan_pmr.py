@@ -2,31 +2,41 @@ import numpy as np
 import time
 from datetime import datetime
 from rtlsdr import RtlSdr
+import tm1637  # <-- Ajout TM1637
 
 # === Canaux PMR446 (MHz) ===
 PMR_CHANNELS = [
     446.00625e6, 446.01875e6, 446.03125e6, 446.04375e6,
     446.05625e6, 446.06875e6, 446.08125e6, 446.09375e6,
     446.10625e6, 446.11875e6, 446.13125e6, 446.14375e6,
-    446.15625e6, 446.16875e6, 446.18125e6, 446.19375e6,
+    446.15625e6, 446.16875e6, 446.18125e6,
 ]
 
 # === Paramètres SDR ===
 SAMPLE_RATE = 240_000
 FFT_SIZE = 65536
 CALIBRATION_SAMPLES = 10
-THRESHOLD_MARGIN_DB = 6
+THRESHOLD_MARGIN_DB = 3
 HOLD_DURATION = 1.5
 CHANNEL_BW = 10e3
 HISTORY_LENGTH = 15
 HISTORY_MIN_INTERVAL = 1.0
-MIN_SIGNAL_MARGIN_DB = 0.5  # Pour filtrer bleed-over
+MIN_SIGNAL_MARGIN_DB = 0.5
 
 # === Initialisation SDR ===
 sdr = RtlSdr()
 sdr.sample_rate = SAMPLE_RATE
-#sdr.gain = 'auto'
 sdr.gain = 50
+
+# === TM1637 minimal setup ===
+CLK = 11  # GPIO pour CLK
+DIO = 10  # GPIO pour DIO
+
+disp = tm1637.TM1637(clk=CLK, dio=DIO)
+disp.brightness = 5
+def display_channel(ch):
+    """Affiche le canal actif (00 si aucun)."""
+    disp.show(f"CH{ch:02d}")
 
 # === Fonction puissance par canal via FFT ===
 def channel_power_db(samples, fs, channel_freq, center_freq, bw=CHANNEL_BW):
@@ -38,6 +48,8 @@ def channel_power_db(samples, fs, channel_freq, center_freq, bw=CHANNEL_BW):
 
 # === Calibration bruit par canal ===
 print("⚙️ Calibration du bruit sur tous les canaux (restez silencieux)...")
+disp.show("CALI")
+
 noise_levels = []
 center_freq = PMR_CHANNELS[len(PMR_CHANNELS)//2]
 sdr.center_freq = center_freq
@@ -50,6 +62,7 @@ for idx, freq in enumerate(PMR_CHANNELS, start=1):
         time.sleep(0.05)
     noise_avg = np.mean(peaks)
     noise_levels.append(noise_avg)
+    disp.show(f"CH{idx:02d}")
     print(f"Canal {idx:02d} | Bruit moyen : {noise_avg:.1f} dB")
 
 thresholds = [nl + THRESHOLD_MARGIN_DB for nl in noise_levels]
@@ -76,13 +89,19 @@ try:
         # Déterminer canal dominant
         dominant_idx, dominant_power = max(channel_powers, key=lambda x: x[1])
 
+        # --- Affichage TM1637 ---
+        if dominant_power > thresholds[dominant_idx] + MIN_SIGNAL_MARGIN_DB:
+            display_channel(dominant_idx + 1)
+        else:
+            display_channel(0)
+
         # Vérifier si le canal dominant dépasse le seuil + marge
         active_channels = []
         if dominant_power > thresholds[dominant_idx] + MIN_SIGNAL_MARGIN_DB:
             last_active_times[dominant_idx] = current_time
             active_channels.append((dominant_idx, dominant_power))
 
-            # Historique : ajouter si intervalle respecté
+            # Historique
             if current_time - last_seen[dominant_idx] > HISTORY_MIN_INTERVAL:
                 history.append((dominant_idx, timestamp))
                 last_seen[dominant_idx] = current_time
@@ -93,11 +112,10 @@ try:
         for idx, _ in channel_powers:
             if current_time - last_active_times[idx] <= HOLD_DURATION:
                 if idx != dominant_idx:
-                    # Ajouter les canaux maintenus (puissance faible)
                     power_db = next(p for i, p in channel_powers if i == idx)
                     active_channels.append((idx, power_db))
 
-        # --- Affichage ---
+        # --- Affichage terminal ---
         print("\033[2J\033[H", end="")  # Clear screen + move cursor top-left
 
         # Historique
