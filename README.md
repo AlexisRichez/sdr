@@ -1,10 +1,38 @@
-# Automatically Start scan_pmr.py on Raspberry Pi
+# RTL-SDR project
 
-This guide explains how to automatically start `scan_pmr.py` at Raspberry Pi boot using a Python virtual environment and systemd.
+## Install SDR environment
+```
+sudo apt update
+sudo apt install rtl-sdr
+sudo apt install python3-pip
+sudo apt install python3-full python3-venv
+python3 -m venv sdr-env
+source sdr-env/bin/activate
+pip install numpy pyrtlsdr
+pip install --upgrade pip setuptools wheel
+pip install scipy
+pip install numpy
+```
 
----
+```
+sudo nano /etc/udev/rules.d/20-rtl-sdr.rules
+# RTL-SDR USB devices
+SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", ATTR{idProduct}=="2838", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", ATTR{idProduct}=="2832", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", ATTR{idProduct}=="2830", MODE="0666"
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
 
-## Prerequisites
+```
+sudo cp /usr/share/rtl-sdr/rtl-sdr.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+## Automatically Start scan_pmr.py
+
+### Prerequisites
 
 - Raspberry Pi running Linux
 - Python installed
@@ -14,7 +42,7 @@ This guide explains how to automatically start `scan_pmr.py` at Raspberry Pi boo
 
 ---
 
-## Step 1 — Create a systemd Service
+### Create a systemd Service
 
 Create a new service file:
 
